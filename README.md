@@ -9,22 +9,29 @@ Open-source browser-based PSD file inspector — a free alternative to Avocode, 
 - 🎨 Load PSD files via drag & drop or file selection
 - 🖼️ Canvas preview with zoom and pan controls
 - 📁 Layer tree with hierarchy and groups
-- 👁️ Show/hide layers with visibility toggle
-- 🎯 Click layers on canvas to select them
+- 👁️ Show/hide layers with visibility toggle (currently disabled)
+- 🎯 Click layers on canvas to select them (including vector layers)
 - 📏 Measure distances between layers
 - 📋 View layer properties (size, position, opacity, blend mode, effects)
 - 💅 Generate CSS code for layers (like CSS Hat or Avocode)
   - Complete CSS properties: size, colors, fonts, shadows, borders, etc.
+  - HEX color format for all colors
   - Absolute positioning separated at the end for easy copying
-  - One-click copy to clipboard
-- ⌨️ Keyboard shortcuts (S - select, H - hand tool, Space - pan)
+  - Select text to copy specific properties
+  - One-click copy buttons for CSS and text content
+- 📤 Export layers to PNG, JPG, SVG
+  - Multiple export scales (1x, 2x, 3x, 4x)
+  - Preview with checkerboard background
+  - SVG export for vector shape layers
+  - Smart Objects exported as rasterized images
+- ⌨️ Keyboard shortcuts (S - select, H - hand tool, L - toggle layers panel, Space - pan)
 - 🔒 100% client-side, your files never leave your browser
 - 🆓 Completely free and open source
 
 ## Technologies
 
 - Vue 3 + TypeScript
-- @webtoon/psd - PSD file parsing
+- ag-psd - PSD file parsing
 - Vite
 
 ## Installation and Running

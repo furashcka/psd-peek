@@ -15,18 +15,18 @@
 
 <script setup lang="ts">
 import LayerItem from './LayerItem.vue'
-import type { Node } from '@webtoon/psd'
+import type { Layer } from 'ag-psd'
 
 defineProps<{
-  layers?: Node[]
-  selectedLayer: Node | null
+  layers?: Layer[]
+  selectedLayer: Layer | null
   expandedGroups: Set<number>
   layerVisibility: Map<number, boolean>
 }>()
 
 defineEmits<{
-  'layer-select': [layer: Node]
-  'toggle-visibility': [layer: Node]
+  'layer-select': [layer: Layer]
+  'toggle-visibility': [layer: Layer]
 }>()
 </script>
 

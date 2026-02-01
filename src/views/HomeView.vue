@@ -7,6 +7,12 @@
         <h2>Upload PSD file</h2>
         <p>Drag and drop file here or click to select</p>
       </div>
+      
+      <!-- Loading overlay -->
+      <div v-if="isLoading" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">{{ loadingStatus }}</div>
+      </div>
     </div>
 
     <div v-else class="viewer">
@@ -20,15 +26,20 @@
         @mousemove="handleMouseMove"
         @mouseup="handleMouseUp"
         @mouseleave="handleMouseUp"
-        @keydown="handleKeyDown"
-        @keyup="handleKeyUp"
-        tabindex="0"
       >
         <canvas ref="canvas"></canvas>
       </div>
 
       <!-- Toolbar with tools -->
       <div class="toolbar">
+        <button 
+          @click="showLeftPanel = !showLeftPanel"
+          title="Toggle Layers Panel (L)"
+        >
+          <span class="tool-icon">☰</span>
+          <span class="tool-key">L</span>
+        </button>
+        <div class="toolbar-separator"></div>
         <button 
           :class="{ active: currentTool === 'select' }" 
           @click="currentTool = 'select'"
@@ -48,13 +59,13 @@
       </div>
 
       <!-- Floating left panel -->
-      <div class="sidebar floating">
+      <div v-if="showLeftPanel" class="sidebar floating">
         <div class="sidebar-header">
           <h3>Layers</h3>
           <button @click="resetViewer" class="btn-reset">✕</button>
         </div>
         <LayerTree 
-          :layers="psdData.children" 
+          :layers="reversedLayers" 
           :expanded-groups="expandedGroups"
           :layer-visibility="layerVisibility"
           @layer-select="selectLayer" 
@@ -80,17 +91,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
-import Psd from '@webtoon/psd'
+import { ref, nextTick, computed, onMounted, onUnmounted } from 'vue'
+import { readPsd, initializeCanvas } from 'ag-psd'
 import LayerTree from '@/components/LayerTree.vue'
 import LayerProperties from '@/components/LayerProperties.vue'
-import type { Node } from '@webtoon/psd'
+import type { Psd, Layer } from 'ag-psd'
+
+// Initialize canvas for ag-psd
+if (typeof document !== 'undefined') {
+  initializeCanvas((width: number, height: number) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    return canvas
+  })
+}
 
 const fileInput = ref<HTMLInputElement>()
 const canvas = ref<HTMLCanvasElement>()
 const canvasContainer = ref<HTMLDivElement>()
-const psdData = ref<Node | null>(null)
-const selectedLayer = ref<Node | null>(null)
+const psdData = ref<Psd | null>(null)
+const selectedLayer = ref<Layer | null>(null)
+const isLoading = ref(false)
+const loadingStatus = ref('')
 
 // Reactive storage for layer visibility (key - layer __uniqueId)
 const layerVisibility = ref<Map<number, boolean>>(new Map())
@@ -107,6 +130,7 @@ const lastMouseY = ref(0)
 type Tool = 'select' | 'hand'
 const currentTool = ref<Tool>('select')
 const isSpacePressed = ref(false)
+const showLeftPanel = ref(true)
 
 // Hover layer for measurements
 const hoverLayer = ref<Node | null>(null)
@@ -128,8 +152,24 @@ const handleDrop = async (event: DragEvent) => {
 
 const loadPsdFile = async (file: File) => {
   try {
+    isLoading.value = true
+    loadingStatus.value = 'Reading file...'
+    
     const arrayBuffer = await file.arrayBuffer()
-    const psd = Psd.parse(arrayBuffer)
+    
+    loadingStatus.value = 'Parsing PSD structure...'
+    await new Promise(resolve => setTimeout(resolve, 100)) // Give UI time to update
+    
+    const psd = readPsd(arrayBuffer, { 
+      skipLayerImageData: false,
+      skipThumbnail: true,
+      useImageData: false,
+      // Enable vector data loading
+      skipVectorData: false
+    })
+    
+    loadingStatus.value = 'Processing layers...'
+    await new Promise(resolve => setTimeout(resolve, 100))
     
     // Add unique IDs to all layers
     let idCounter = 0
@@ -141,9 +181,12 @@ const loadPsdFile = async (file: File) => {
     }
     addUniqueIds(psd)
     
+    loadingStatus.value = 'Initializing visibility...'
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
     // Initialize layer visibility from PSD
     const initVisibility = (node: any) => {
-      const isHidden = node.isHidden === true || node.layerFrame?.layerProperties?.hidden === true
+      const isHidden = node.hidden === true
       layerVisibility.value.set(node.__uniqueId, !isHidden)
       
       if (node.children) {
@@ -154,14 +197,20 @@ const loadPsdFile = async (file: File) => {
     
     psdData.value = psd
     
+    loadingStatus.value = 'Rendering canvas...'
     await nextTick()
     await renderPsd(psd)
     
     await nextTick()
     fitToScreen()
+    
+    isLoading.value = false
+    loadingStatus.value = ''
   } catch (error) {
     console.error('Error loading PSD:', error)
     alert('Failed to load PSD file')
+    isLoading.value = false
+    loadingStatus.value = ''
   }
 }
 
@@ -182,75 +231,29 @@ const renderPsd = async (psd: any) => {
   canvas.value.width = window.innerWidth
   canvas.value.height = window.innerHeight
 
-  // Get composite image of entire PSD
-  try {
-    const compositeData = await psd.composite()
-    
-    if (compositeData) {
-      // Create temporary canvas for PSD
-      const tempCanvas = document.createElement('canvas')
-      tempCanvas.width = psd.width
-      tempCanvas.height = psd.height
-      const tempCtx = tempCanvas.getContext('2d')
-      
-      if (tempCtx) {
-        const imageData = new ImageData(
-          new Uint8ClampedArray(compositeData),
-          psd.width,
-          psd.height
-        )
-        tempCtx.putImageData(imageData, 0, 0)
-        
-        // Save temporary canvas for subsequent rendering
-        ;(canvas.value as any).__psdCanvas = tempCanvas
-      }
-    } else {
-      console.warn('No composite data available. PSD must be saved with "Maximize Compatibility" mode')
-    }
-  } catch (e) {
-    console.error('Error rendering composite:', e)
+  // ag-psd already provides canvas with composite image
+  if (psd.canvas) {
+    // Save PSD canvas for rendering
+    ;(canvas.value as any).__psdCanvas = psd.canvas
   }
   
-  // Also render individual layers for visibility control
-  const renderLayers = async (layers: any[] | undefined) => {
+  // Also render individual layers
+  const renderLayers = (layers: any[] | undefined) => {
     if (!layers) return
     
     for (const layer of layers) {
       if (layer.children && layer.children.length > 0) {
-        await renderLayers(layer.children)
+        renderLayers(layer.children)
       }
       
-      if (layer.type === 'Layer') {
-        try {
-          // Try to render with effects enabled
-          const layerData = await layer.composite(true, false)
-          
-          if (layerData && layer.width > 0 && layer.height > 0) {
-            const layerCanvas = document.createElement('canvas')
-            layerCanvas.width = layer.width
-            layerCanvas.height = layer.height
-            const layerCtx = layerCanvas.getContext('2d')
-            
-            if (layerCtx) {
-              const imageData = new ImageData(
-                new Uint8ClampedArray(layerData),
-                layer.width,
-                layer.height
-              )
-              layerCtx.putImageData(imageData, 0, 0)
-              
-              // Save layer canvas for later use
-              ;(layer as any).__canvas = layerCanvas
-            }
-          }
-        } catch (e) {
-          console.warn(`Failed to render layer ${layer.name}:`, e)
-        }
+      // ag-psd already provides canvas for each layer
+      if (layer.canvas) {
+        ;(layer as any).__canvas = layer.canvas
       }
     }
   }
   
-  await renderLayers(psd.children)
+  renderLayers(psd.children)
   
   // Save PSD data
   ;(canvas.value as any).__psdData = psd
@@ -276,36 +279,28 @@ const drawCanvas = () => {
   ctx.scale(zoom.value, zoom.value)
   ctx.translate(-psdCanvas.width / 2, -psdCanvas.height / 2)
   
-  // Always draw full composite (it has correct clipping)
-  // But we need to mask out hidden layers
-  const hasHiddenLayers = () => {
-    const checkLayers = (layers: any[] | undefined): boolean => {
-      if (!layers) return false
-      
-      for (const layer of layers) {
-        if (!isLayerVisible(layer)) return true
-        if (layer.children && checkLayers(layer.children)) return true
-      }
-      return false
-    }
-    return checkLayers(psd.children)
-  }
-  
-  if (!hasHiddenLayers()) {
-    // All layers visible - draw full composite
-    ctx.drawImage(psdCanvas, 0, 0)
-  } else {
-    // Some layers hidden - draw full composite (it already has correct visibility from PSD)
-    ctx.drawImage(psdCanvas, 0, 0)
-  }
+  // Draw full composite (visibility toggle doesn't work with ag-psd)
+  ctx.drawImage(psdCanvas, 0, 0)
   
   // Draw selection of selected layer
-  if (selectedLayer.value && selectedLayer.value.type === 'Layer') {
-    const layer = selectedLayer.value
-    const left = layer.left || 0
-    const top = layer.top || 0
-    const width = layer.width || 0
-    const height = layer.height || 0
+  if (selectedLayer.value) {
+    const layer = selectedLayer.value as any
+    let left = layer.left || 0
+    let top = layer.top || 0
+    let right = layer.right || 0
+    let bottom = layer.bottom || 0
+    
+    // For vector layers, use bounding box from vectorOrigination
+    if (layer.vectorOrigination?.keyDescriptorList?.[0]?.keyOriginShapeBoundingBox) {
+      const bbox = layer.vectorOrigination.keyDescriptorList[0].keyOriginShapeBoundingBox
+      left = bbox.left.value
+      top = bbox.top.value
+      right = bbox.right.value
+      bottom = bbox.bottom.value
+    }
+    
+    const width = right - left
+    const height = bottom - top
     
     ctx.strokeStyle = '#42b983'
     ctx.lineWidth = 2 / zoom.value
@@ -319,13 +314,17 @@ const drawCanvas = () => {
     
     const sLeft = selected.left || 0
     const sTop = selected.top || 0
-    const sRight = sLeft + (selected.width || 0)
-    const sBottom = sTop + (selected.height || 0)
+    const sWidth = (selected.right || 0) - (selected.left || 0)
+    const sHeight = (selected.bottom || 0) - (selected.top || 0)
+    const sRight = sLeft + sWidth
+    const sBottom = sTop + sHeight
     
     const hLeft = hover.left || 0
     const hTop = hover.top || 0
-    const hRight = hLeft + (hover.width || 0)
-    const hBottom = hTop + (hover.height || 0)
+    const hWidth = (hover.right || 0) - (hover.left || 0)
+    const hHeight = (hover.bottom || 0) - (hover.top || 0)
+    const hRight = hLeft + hWidth
+    const hBottom = hTop + hHeight
     
     ctx.strokeStyle = '#ff6b6b'
     ctx.fillStyle = '#ff6b6b'
@@ -444,71 +443,18 @@ const drawCanvas = () => {
     // Draw hover layer border
     ctx.strokeStyle = '#ff6b6b'
     ctx.setLineDash([4 / zoom.value, 4 / zoom.value])
-    ctx.strokeRect(hLeft, hTop, hover.width || 0, hover.height || 0)
+    ctx.strokeRect(hLeft, hTop, hWidth, hHeight)
     ctx.setLineDash([])
   }
   
   ctx.restore()
 }
 
-const toggleLayerVisibility = (layer: Node) => {
-  const layerId = (layer as any).__uniqueId
-  const currentVisibility = layerVisibility.value.get(layerId) ?? true
-  layerVisibility.value.set(layerId, !currentVisibility)
-  
-  // Re-render PSD composite with new visibility
-  rerenderPsdComposite()
+const toggleLayerVisibility = (layer: any) => {
+  alert('Coming soon: Layer visibility toggle is under development')
 }
 
-const rerenderPsdComposite = async () => {
-  if (!canvas.value) return
-  
-  const psd = (canvas.value as any).__psdData
-  if (!psd) return
-  
-  // Create a new composite with current visibility settings
-  const tempCanvas = document.createElement('canvas')
-  tempCanvas.width = psd.width
-  tempCanvas.height = psd.height
-  const tempCtx = tempCanvas.getContext('2d')
-  
-  if (!tempCtx) return
-  
-  // Draw layers respecting visibility
-  const drawLayersToComposite = (layers: any[] | undefined) => {
-    if (!layers) return
-    
-    // Draw in reverse order (bottom to top)
-    for (let i = layers.length - 1; i >= 0; i--) {
-      const layer = layers[i]
-      
-      // Skip if not visible
-      if (!isLayerVisible(layer)) continue
-      
-      // Draw children first
-      if (layer.children && layer.children.length > 0) {
-        drawLayersToComposite(layer.children)
-      }
-      
-      // Draw layer
-      if (layer.type === 'Layer' && layer.__canvas) {
-        const opacity = (layer.opacity ?? 255) / 255
-        tempCtx.globalAlpha = opacity
-        tempCtx.drawImage(layer.__canvas, layer.left ?? 0, layer.top ?? 0)
-        tempCtx.globalAlpha = 1
-      }
-    }
-  }
-  
-  drawLayersToComposite(psd.children)
-  
-  // Update the composite canvas
-  ;(canvas.value as any).__psdCanvas = tempCanvas
-  
-  drawCanvas()
-}
-
-const selectLayer = (layer: Node) => {
+const selectLayer = (layer: any) => {
   selectedLayer.value = layer
   
   // Expand all parent groups
@@ -522,12 +468,12 @@ const selectLayer = (layer: Node) => {
   drawCanvas()
 }
 
-const expandParentGroups = (layer: Node) => {
+const expandParentGroups = (layer: any) => {
   if (!psdData.value) return
   
   // Find path from root to layer
-  const findPath = (node: Node, target: Node, path: Node[] = []): Node[] | null => {
-    if ((node as any).__uniqueId === (target as any).__uniqueId) {
+  const findPath = (node: any, target: any, path: any[] = []): any[] | null => {
+    if (node.__uniqueId === target.__uniqueId) {
       return [...path, node]
     }
     
@@ -560,6 +506,12 @@ const scrollToLayer = (layer: Node) => {
 
 // Storage for expanded groups
 const expandedGroups = ref<Set<number>>(new Set())
+
+// Reversed layers for correct display order (top to bottom)
+const reversedLayers = computed(() => {
+  if (!psdData.value?.children) return []
+  return [...psdData.value.children].reverse()
+})
 
 const handleWheel = (event: WheelEvent) => {
   if (!canvas.value) return
@@ -600,6 +552,9 @@ const handleMouseDown = (event: MouseEvent) => {
   }
 }
 
+// Cache for parent visibility checks
+const parentVisibilityCache = new Map<number, boolean>()
+
 const isLayerVisible = (layer: Node, debug: boolean = false): boolean => {
   if (!psdData.value) return false
   
@@ -608,6 +563,11 @@ const isLayerVisible = (layer: Node, debug: boolean = false): boolean => {
   // Check layer visibility from reactive storage
   if (layerVisibility.value.get(layerId) === false) {
     return false
+  }
+  
+  // Check cache first
+  if (parentVisibilityCache.has(layerId)) {
+    return parentVisibilityCache.get(layerId)!
   }
   
   // Check visibility of all parent groups
@@ -632,6 +592,7 @@ const isLayerVisible = (layer: Node, debug: boolean = false): boolean => {
     const parentVisible = layerVisibility.value.get(parentId)
     
     if (parentVisible === false) {
+      parentVisibilityCache.set(layerId, false)
       return false
     }
     
@@ -639,6 +600,7 @@ const isLayerVisible = (layer: Node, debug: boolean = false): boolean => {
     parent = findParent(psdData.value, current)
   }
   
+  parentVisibilityCache.set(layerId, true)
   return true
 }
 
@@ -660,7 +622,7 @@ const selectLayerAtPoint = (clientX: number, clientY: number) => {
   
   const candidateLayers: Array<{ layer: Node; area: number }> = []
   
-  const collectLayersAtPoint = (layers: Node[] | undefined, x: number, y: number) => {
+  const collectLayersAtPoint = (layers: any[] | undefined, x: number, y: number) => {
     if (!layers) return
     
     for (const layer of layers) {
@@ -668,13 +630,25 @@ const selectLayerAtPoint = (clientX: number, clientY: number) => {
         collectLayersAtPoint(layer.children, x, y)
       }
       
-      if (layer.type === 'Layer' && layer.opacity > 0) {
-        const left = layer.left ?? 0
-        const top = layer.top ?? 0
-        const width = layer.width ?? 0
-        const height = layer.height ?? 0
+      if (layer.opacity !== undefined && layer.opacity > 0) {
+        let left = layer.left ?? 0
+        let top = layer.top ?? 0
+        let right = layer.right ?? 0
+        let bottom = layer.bottom ?? 0
         
-        if (width > 0 && height > 0 && x >= left && x <= left + width && y >= top && y <= top + height) {
+        // For vector layers, use bounding box from vectorOrigination
+        if (layer.vectorOrigination?.keyDescriptorList?.[0]?.keyOriginShapeBoundingBox) {
+          const bbox = layer.vectorOrigination.keyDescriptorList[0].keyOriginShapeBoundingBox
+          left = bbox.left.value
+          top = bbox.top.value
+          right = bbox.right.value
+          bottom = bbox.bottom.value
+        }
+        
+        const width = right - left
+        const height = bottom - top
+        
+        if (width > 0 && height > 0 && x >= left && x <= right && y >= top && y <= bottom) {
           if (isLayerVisible(layer)) {
             const area = width * height
             candidateLayers.push({ layer, area })
@@ -711,7 +685,7 @@ const updateHoverLayer = (clientX: number, clientY: number) => {
   
   const candidateLayers: Array<{ layer: Node; area: number }> = []
   
-  const collectLayersAtPoint = (layers: Node[] | undefined, x: number, y: number) => {
+  const collectLayersAtPoint = (layers: any[] | undefined, x: number, y: number) => {
     if (!layers) return
     
     for (const layer of layers) {
@@ -719,13 +693,25 @@ const updateHoverLayer = (clientX: number, clientY: number) => {
         collectLayersAtPoint(layer.children, x, y)
       }
       
-      if (layer.type === 'Layer' && layer.opacity > 0 && isLayerVisible(layer)) {
-        const left = layer.left ?? 0
-        const top = layer.top ?? 0
-        const width = layer.width ?? 0
-        const height = layer.height ?? 0
+      if (layer.opacity !== undefined && layer.opacity > 0 && isLayerVisible(layer)) {
+        let left = layer.left ?? 0
+        let top = layer.top ?? 0
+        let right = layer.right ?? 0
+        let bottom = layer.bottom ?? 0
         
-        if (width > 0 && height > 0 && x >= left && x <= left + width && y >= top && y <= top + height) {
+        // For vector layers, use bounding box from vectorOrigination
+        if (layer.vectorOrigination?.keyDescriptorList?.[0]?.keyOriginShapeBoundingBox) {
+          const bbox = layer.vectorOrigination.keyDescriptorList[0].keyOriginShapeBoundingBox
+          left = bbox.left.value
+          top = bbox.top.value
+          right = bbox.right.value
+          bottom = bbox.bottom.value
+        }
+        
+        const width = right - left
+        const height = bottom - top
+        
+        if (width > 0 && height > 0 && x >= left && x <= right && y >= top && y <= bottom) {
           const area = width * height
           candidateLayers.push({ layer, area })
         }
@@ -753,6 +739,9 @@ const updateHoverLayer = (clientX: number, clientY: number) => {
   }
 }
 
+// Throttle for hover updates
+let hoverUpdateTimeout: number | null = null
+
 const handleMouseMove = (event: MouseEvent) => {
   if (isDragging.value) {
     const deltaX = event.clientX - lastMouseX.value
@@ -763,8 +752,13 @@ const handleMouseMove = (event: MouseEvent) => {
     lastMouseY.value = event.clientY
     drawCanvas()
   } else if (currentTool.value === 'select' && selectedLayer.value && !isSpacePressed.value) {
-    // Determine layer under cursor for measurements
-    updateHoverLayer(event.clientX, event.clientY)
+    // Throttle hover updates to improve performance
+    if (hoverUpdateTimeout === null) {
+      hoverUpdateTimeout = window.setTimeout(() => {
+        updateHoverLayer(event.clientX, event.clientY)
+        hoverUpdateTimeout = null
+      }, 50) // Update every 50ms max
+    }
   }
 }
 
@@ -773,22 +767,44 @@ const handleMouseUp = () => {
 }
 
 const handleKeyDown = (event: KeyboardEvent) => {
+  // Only handle if viewer is open
+  if (!psdData.value) return
+  
   if (event.code === 'Space' && !isSpacePressed.value) {
     event.preventDefault()
     isSpacePressed.value = true
   } else if (event.code === 'KeyS') {
+    event.preventDefault()
     currentTool.value = 'select'
   } else if (event.code === 'KeyH') {
+    event.preventDefault()
     currentTool.value = 'hand'
+  } else if (event.code === 'KeyL') {
+    event.preventDefault()
+    showLeftPanel.value = !showLeftPanel.value
   }
 }
 
 const handleKeyUp = (event: KeyboardEvent) => {
+  // Only handle if viewer is open
+  if (!psdData.value) return
+  
   if (event.code === 'Space') {
     event.preventDefault()
     isSpacePressed.value = false
   }
 }
+
+// Setup global keyboard handlers
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyDown)
+  window.addEventListener('keyup', handleKeyUp)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keyup', handleKeyUp)
+})
 
 const zoomIn = () => {
   zoom.value = Math.min(10, zoom.value * 1.2)
@@ -865,6 +881,43 @@ const resetViewer = () => {
   align-items: center;
   justify-content: center;
   background: #f5f5f5;
+  position: relative;
+}
+
+.loading-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.loading-spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(66, 185, 131, 0.2);
+  border-top-color: #42b983;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-text {
+  margin-top: 20px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .upload-content {
@@ -933,7 +986,7 @@ canvas {
 
 .toolbar {
   position: absolute;
-  top: 20px;
+  top: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -944,6 +997,12 @@ canvas {
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   z-index: 100;
+}
+
+.toolbar-separator {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
 }
 
 .toolbar button {
@@ -990,10 +1049,10 @@ canvas {
 
 .sidebar.floating {
   position: absolute;
-  top: 20px;
-  left: 20px;
+  top: 8px;
+  left: 8px;
   width: 280px;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100vh - 16px);
   background: rgba(30, 30, 30, 0.95);
   backdrop-filter: blur(10px);
   color: white;
@@ -1036,10 +1095,10 @@ canvas {
 
 .properties-panel.floating {
   position: absolute;
-  top: 20px;
-  right: 20px;
+  top: 8px;
+  right: 8px;
   width: 300px;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100vh - 16px);
   background: rgba(30, 30, 30, 0.95);
   backdrop-filter: blur(10px);
   color: white;
@@ -1058,7 +1117,7 @@ canvas {
 
 .zoom-controls {
   position: absolute;
-  bottom: 20px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

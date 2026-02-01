@@ -33,18 +33,18 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import type { Node } from '@webtoon/psd'
+import type { Layer } from 'ag-psd'
 
 const props = defineProps<{
-  layer: Node
-  selectedLayer: Node | null
+  layer: Layer
+  selectedLayer: Layer | null
   expandedGroups: Set<number>
   layerVisibility: Map<number, boolean>
 }>()
 
 const emit = defineEmits<{
-  'layer-select': [layer: Node]
-  'toggle-visibility': [layer: Node]
+  'layer-select': [layer: Layer]
+  'toggle-visibility': [layer: Layer]
 }>()
 
 const isExpanded = ref(false)
@@ -86,8 +86,9 @@ const handleClick = () => {
 }
 
 const getLayerIcon = () => {
-  if (props.layer.type === 'Group') return '📁'
-  if (props.layer.type === 'Text') return '📝'
+  // ag-psd uses children to determine if it's a group
+  if (hasChildren.value) return '📁'
+  if (props.layer.text) return '📝'
   return '🖼️'
 }
 </script>

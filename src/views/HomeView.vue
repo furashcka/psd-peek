@@ -63,13 +63,17 @@
         />
       </div>
 
+      <!-- Right panel with properties -->
+      <div class="properties-panel floating" v-if="selectedLayer">
+        <LayerProperties :layer="selectedLayer" />
+      </div>
+
       <!-- Zoom controls -->
       <div class="zoom-controls">
-        <button @click="zoomIn">+</button>
+        <button @click="zoomOut" title="Zoom Out">−</button>
         <span>{{ Math.round(zoom * 100) }}%</span>
-        <button @click="zoomOut">−</button>
-        <button @click="resetZoom">100%</button>
-        <button @click="fitToScreen">Fit</button>
+        <button @click="zoomIn" title="Zoom In">+</button>
+        <button @click="fitToScreen" title="Fit to Screen">⛶</button>
       </div>
     </div>
   </div>
@@ -79,6 +83,7 @@
 import { ref, nextTick } from 'vue'
 import Psd from '@webtoon/psd'
 import LayerTree from '@/components/LayerTree.vue'
+import LayerProperties from '@/components/LayerProperties.vue'
 import type { Node } from '@webtoon/psd'
 
 const fileInput = ref<HTMLInputElement>()
@@ -125,9 +130,6 @@ const loadPsdFile = async (file: File) => {
   try {
     const arrayBuffer = await file.arrayBuffer()
     const psd = Psd.parse(arrayBuffer)
-    console.log('PSD parsed:', psd)
-    console.log('PSD width:', psd.width, 'height:', psd.height)
-    console.log('PSD children:', psd.children)
     
     // Add unique IDs to all layers
     let idCounter = 0
@@ -153,13 +155,10 @@ const loadPsdFile = async (file: File) => {
     psdData.value = psd
     
     await nextTick()
-    console.log('After nextTick, about to render...')
     await renderPsd(psd)
     
     await nextTick()
     fitToScreen()
-    
-    console.log('Render complete')
   } catch (error) {
     console.error('Error loading PSD:', error)
     alert('Failed to load PSD file')
@@ -167,15 +166,12 @@ const loadPsdFile = async (file: File) => {
 }
 
 const renderPsd = async (psd: any) => {
-  console.log('renderPsd called, canvas.value:', canvas.value)
-  
   if (!canvas.value || !canvasContainer.value) {
     console.error('Canvas or container ref is null!')
     return
   }
   
   const ctx = canvas.value.getContext('2d')
-  console.log('Canvas context:', ctx)
   
   if (!ctx) {
     console.error('Cannot get 2d context!')
@@ -186,14 +182,9 @@ const renderPsd = async (psd: any) => {
   canvas.value.width = window.innerWidth
   canvas.value.height = window.innerHeight
 
-  console.log('Canvas size set to viewport:', canvas.value.width, canvas.value.height)
-  console.log('PSD size:', psd.width, psd.height)
-
   // Get composite image of entire PSD
   try {
-    console.log('Calling psd.composite()...')
     const compositeData = await psd.composite()
-    console.log('Composite data received:', compositeData ? `${compositeData.length} bytes` : 'null')
     
     if (compositeData) {
       // Create temporary canvas for PSD
@@ -212,8 +203,6 @@ const renderPsd = async (psd: any) => {
         
         // Save temporary canvas for subsequent rendering
         ;(canvas.value as any).__psdCanvas = tempCanvas
-        
-        console.log('PSD image prepared successfully')
       }
     } else {
       console.warn('No composite data available. PSD must be saved with "Maximize Compatibility" mode')
@@ -234,9 +223,7 @@ const renderPsd = async (psd: any) => {
       if (layer.type === 'Layer') {
         try {
           // Try to render with effects enabled
-          console.log(`Rendering layer ${layer.name} with effects...`)
           const layerData = await layer.composite(true, false)
-          console.log(`Layer ${layer.name} rendered:`, layerData ? `${layerData.length} bytes` : 'null')
           
           if (layerData && layer.width > 0 && layer.height > 0) {
             const layerCanvas = document.createElement('canvas')
@@ -267,8 +254,6 @@ const renderPsd = async (psd: any) => {
   
   // Save PSD data
   ;(canvas.value as any).__psdData = psd
-  
-  console.log('PSD layers prepared successfully')
 }
 
 const drawCanvas = () => {
@@ -622,7 +607,6 @@ const isLayerVisible = (layer: Node, debug: boolean = false): boolean => {
   
   // Check layer visibility from reactive storage
   if (layerVisibility.value.get(layerId) === false) {
-    if (debug) console.log(`Layer ${layer.name} is hidden via layerVisibility`)
     return false
   }
   
@@ -648,9 +632,6 @@ const isLayerVisible = (layer: Node, debug: boolean = false): boolean => {
     const parentVisible = layerVisibility.value.get(parentId)
     
     if (parentVisible === false) {
-      if (debug) {
-        console.log(`Layer ${layer.name} is hidden because parent ${parent.name} is hidden`)
-      }
       return false
     }
     
@@ -846,8 +827,6 @@ const fitToScreen = () => {
   panX.value = 0
   panY.value = 0
   drawCanvas()
-  
-  console.log('Fit to screen:', { containerWidth, containerHeight, psdWidth, psdHeight, scale })
 }
 
 const updateCanvasTransform = () => {
@@ -1080,21 +1059,22 @@ canvas {
 .zoom-controls {
   position: absolute;
   bottom: 20px;
-  right: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   background: rgba(30, 30, 30, 0.95);
   backdrop-filter: blur(10px);
-  padding: 8px 12px;
+  padding: 8px;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   z-index: 10;
 }
 
 .zoom-controls button {
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: white;
   width: 32px;
   height: 32px;
@@ -1104,11 +1084,12 @@ canvas {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .zoom-controls button:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .zoom-controls span {
@@ -1116,5 +1097,6 @@ canvas {
   font-size: 13px;
   min-width: 50px;
   text-align: center;
+  padding: 0 8px;
 }
 </style>

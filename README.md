@@ -13,6 +13,10 @@ Open-source browser-based PSD file inspector — a free alternative to Avocode, 
 - 🎯 Click layers on canvas to select them
 - 📏 Measure distances between layers
 - 📋 View layer properties (size, position, opacity, blend mode, effects)
+- 💅 Generate CSS code for layers (like CSS Hat or Avocode)
+  - Complete CSS properties: size, colors, fonts, shadows, borders, etc.
+  - Absolute positioning separated at the end for easy copying
+  - One-click copy to clipboard
 - ⌨️ Keyboard shortcuts (S - select, H - hand tool, Space - pan)
 - 🔒 100% client-side, your files never leave your browser
 - 🆓 Completely free and open source

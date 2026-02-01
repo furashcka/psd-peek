@@ -1,43 +1,43 @@
 # PSD Viewer - MVP
 
-Браузерный просмотрщик PSD файлов, аналог Figma Dev Mode или Avocode.
+Browser-based PSD file viewer, similar to Figma Dev Mode or Avocode.
 
-## Возможности MVP
+## MVP Features
 
-- ✅ Загрузка PSD файлов через drag & drop или выбор файла
-- ✅ Отображение превью PSD
-- ✅ Дерево слоев с иерархией
-- ✅ Просмотр свойств слоя (размер, позиция, прозрачность, режим наложения)
-- ✅ Поддержка текстовых слоев
-- ✅ Работает полностью в браузере, без сервера
+- ✅ Load PSD files via drag & drop or file selection
+- ✅ Display PSD preview
+- ✅ Layer tree with hierarchy
+- ✅ View layer properties (size, position, opacity, blend mode)
+- ✅ Text layer support
+- ✅ Works entirely in browser, no server required
 
-## Технологии
+## Technologies
 
 - Vue 3 + TypeScript
-- @webtoon/psd - парсинг PSD файлов
+- @webtoon/psd - PSD file parsing
 - Vite
 
-## Установка и запуск
+## Installation and Running
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Использование
+## Usage
 
-1. Откройте приложение в браузере
-2. Перетащите PSD файл в область загрузки или нажмите для выбора
-3. Просматривайте слои в левой панели
-4. Кликайте на слой для просмотра его свойств в правой панели
+1. Open the application in your browser
+2. Drag and drop a PSD file into the upload area or click to select
+3. Browse layers in the left panel
+4. Click on a layer to view its properties in the right panel
 
-## Планы развития
+## Future Plans
 
-- [ ] Экспорт слоев в PNG/SVG
-- [ ] Измерение расстояний между элементами
-- [ ] Копирование CSS свойств
-- [ ] Поиск по слоям
-- [ ] Масштабирование и панорамирование canvas
-- [ ] Выбор слоя кликом на canvas
-- [ ] Отображение/скрытие слоев
-- [ ] Экспорт спецификаций для разработчиков
+- [ ] Export layers to PNG/SVG
+- [ ] Measure distances between elements
+- [ ] Copy CSS properties
+- [ ] Search through layers
+- [ ] Canvas zoom and pan
+- [ ] Select layer by clicking on canvas
+- [ ] Show/hide layers
+- [ ] Export specifications for developers

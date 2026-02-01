@@ -49,7 +49,7 @@ const emit = defineEmits<{
 
 const isExpanded = ref(false)
 
-// Следим за expandedGroups и раскрываем группу если она в списке
+// Watch expandedGroups and expand group if it's in the list
 watch(() => props.expandedGroups, (newGroups) => {
   const layerId = (props.layer as any).__uniqueId
   if (newGroups.has(layerId)) {
@@ -64,7 +64,7 @@ const hasChildren = computed(() => {
 const isSelected = computed(() => {
   if (!props.selectedLayer) return false
   
-  // Сравниваем по уникальному ID
+  // Compare by unique ID
   return (props.selectedLayer as any).__uniqueId === (props.layer as any).__uniqueId
 })
 

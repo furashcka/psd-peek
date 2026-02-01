@@ -44,8 +44,14 @@
         <canvas v-if="layerCanvas" ref="previewCanvas" class="preview-canvas"></canvas>
         <div v-else-if="isVectorSmartObject" class="vector-layer-notice">
           Vector Smart Object<br>
-          <small>Contains embedded vector file (AI/PDF/SVG)</small><br>
-          <small style="color: #42b983;">Exporting as rasterized SVG</small>
+          <small v-if="linkedFileData">
+            {{ linkedFileData.name }} ({{ linkedFileData.type }})<br>
+            {{ Math.round(linkedFileData.data.length / 1024) }}KB embedded data
+          </small>
+          <small v-else>
+            Contains embedded vector file (AI/PDF/SVG)<br>
+            <span style="color: #f56c6c;">⚠️ Embedded data not found</span>
+          </small>
         </div>
         <div v-else class="vector-layer-notice">
           Vector shape layer<br>
@@ -107,6 +113,7 @@ import type { Layer } from 'ag-psd'
 
 const props = defineProps<{
   layer: Layer
+  psd?: any // Root PSD object to access linkedFiles
 }>()
 
 const showCopyCssNotification = ref(false)
@@ -121,6 +128,57 @@ const isVectorLayer = computed(() => {
 const isVectorSmartObject = computed(() => {
   const layer = props.layer as any
   return layer.placedLayer?.type === 'vector'
+})
+
+// Check if we have linked file data for this Smart Object
+const linkedFileData = computed(() => {
+  const layer = props.layer as any
+  if (!layer.placedLayer || !props.psd?.linkedFiles) return null
+  
+  // Try to find linked file by ID or placed ID
+  const placedId = layer.placedLayer.id
+  const placedPlaced = layer.placedLayer.placed
+  
+  // Try matching by ID or placed field (most reliable)
+  let linkedFile = props.psd.linkedFiles.find((f: any) => 
+    f.id === placedId || f.id === placedPlaced
+  )
+  
+  // If not found, try matching by exact name (safer fallback)
+  if (!linkedFile && layer.name) {
+    const layerNameLower = layer.name.toLowerCase()
+    
+    // First try: exact match (without extension)
+    linkedFile = props.psd.linkedFiles.find((f: any) => {
+      if (!f.name) return false
+      const fileNameWithoutExt = f.name.replace(/\.[^.]+$/, '').toLowerCase()
+      return fileNameWithoutExt === layerNameLower
+    })
+    
+    // Second try: exact match (with extension)
+    if (!linkedFile) {
+      linkedFile = props.psd.linkedFiles.find((f: any) => 
+        f.name && f.name.toLowerCase() === layerNameLower
+      )
+    }
+    
+    // Last resort: partial match (but warn about it)
+    if (!linkedFile) {
+      linkedFile = props.psd.linkedFiles.find((f: any) => 
+        f.name && f.name.toLowerCase().includes(layerNameLower)
+      )
+      if (linkedFile) {
+        console.warn('⚠️ Using partial name match - may be incorrect:', layer.name, '→', linkedFile.name)
+      }
+    }
+  }
+  
+  if (linkedFile && linkedFile.data) {
+    console.log('📦 Found linked file data:', linkedFile.name, linkedFile.type, linkedFile.data.length, 'bytes')
+    return linkedFile
+  }
+  
+  return null
 })
 
 // Draw preview when layer changes
@@ -188,8 +246,35 @@ const textInfo = computed(() => {
 const debugData = computed(() => {
   const layer = props.layer as any
   
-  // Output ALL properties of the layer
-  return JSON.stringify(layer, null, 2)
+  // Create debug object with layer data and linked files info
+  const debug: any = {
+    layer: layer,
+  }
+  
+  // Add linked files info if this is a Smart Object
+  if (layer.placedLayer && props.psd?.linkedFiles) {
+    debug.linkedFilesAvailable = props.psd.linkedFiles.length
+    debug.placedLayerId = layer.placedLayer.id
+    debug.placedLayerPlaced = layer.placedLayer.placed
+    
+    // Show matching linked files
+    const matches = props.psd.linkedFiles.filter((f: any) => 
+      f.id === layer.placedLayer.id || 
+      f.id === layer.placedLayer.placed ||
+      (layer.name && f.name && f.name.toLowerCase().includes(layer.name.toLowerCase()))
+    )
+    
+    if (matches.length > 0) {
+      debug.matchingLinkedFiles = matches.map((f: any) => ({
+        id: f.id,
+        name: f.name,
+        type: f.type,
+        dataSize: f.data ? f.data.length : 0
+      }))
+    }
+  }
+  
+  return JSON.stringify(debug, null, 2)
 })
 
 const cssCode = computed(() => {
@@ -496,6 +581,54 @@ const exportAll = async () => {
     const format = item.format
     
     if (format === 'svg') {
+      // FIRST: Check if we have embedded vector file data (AI/PDF/SVG) from Smart Object
+      if (isVectorSmartObject && linkedFileData.value) {
+        try {
+          const fileData = linkedFileData.value.data
+          const fileType = linkedFileData.value.type?.toLowerCase() || ''
+          const fileName = linkedFileData.value.name || 'layer'
+          
+          console.log('🎨 Attempting to export embedded vector file:', fileName, fileType)
+          
+          // Check if it's SVG data
+          if (fileType.includes('svg') || fileName.endsWith('.svg')) {
+            // Direct SVG export
+            const svgText = new TextDecoder().decode(fileData)
+            const blob = new Blob([svgText], { type: 'image/svg+xml' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `${props.layer.name || 'layer'}.svg`
+            a.click()
+            URL.revokeObjectURL(url)
+            
+            await new Promise(resolve => setTimeout(resolve, 100))
+            continue
+          }
+          
+          // For AI/PDF files, we can't directly convert to SVG in browser
+          // But we can export the raw file for user to convert externally
+          if (fileType.includes('pdf') || fileType.includes('illustrator') || fileName.endsWith('.ai') || fileName.endsWith('.pdf')) {
+            console.log('⚠️ AI/PDF file detected - exporting raw file')
+            const blob = new Blob([fileData], { type: 'application/octet-stream' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            const ext = fileName.split('.').pop() || 'ai'
+            a.href = url
+            a.download = `${props.layer.name || 'layer'}.${ext}`
+            a.click()
+            URL.revokeObjectURL(url)
+            
+            alert(`Exported ${ext.toUpperCase()} file. You can convert it to SVG using Adobe Illustrator or online converters.`)
+            
+            await new Promise(resolve => setTimeout(resolve, 100))
+            continue
+          }
+        } catch (e) {
+          console.error('Failed to export embedded vector file:', e)
+        }
+      }
+      
       // Check if this is a vector shape layer
       const vectorMask = layer.vectorMask
       const vectorFill = layer.vectorFill
@@ -622,6 +755,75 @@ const exportAll = async () => {
       
       await new Promise(resolve => setTimeout(resolve, 100))
       continue
+    }
+    
+    // For raster formats, check if we can render from SVG for better quality
+    if (isVectorSmartObject && linkedFileData.value) {
+      const fileData = linkedFileData.value.data
+      const fileType = linkedFileData.value.type?.toLowerCase() || ''
+      const fileName = linkedFileData.value.name || 'layer'
+      
+      // If it's SVG, render it at target scale for perfect quality
+      if (fileType.includes('svg') || fileName.endsWith('.svg')) {
+        try {
+          console.log('🎨 Rendering SVG at', scale, 'x scale for', format.toUpperCase())
+          
+          const svgText = new TextDecoder().decode(fileData)
+          const svgBlob = new Blob([svgText], { type: 'image/svg+xml' })
+          const svgUrl = URL.createObjectURL(svgBlob)
+          
+          // Create image from SVG
+          const img = new Image()
+          
+          await new Promise((resolve, reject) => {
+            img.onload = resolve
+            img.onerror = reject
+            img.src = svgUrl
+          })
+          
+          // Get original SVG dimensions
+          const width = layer.placedLayer?.width || img.width
+          const height = layer.placedLayer?.height || img.height
+          
+          // Create canvas at scaled resolution
+          const exportCanvas = document.createElement('canvas')
+          exportCanvas.width = width * scale
+          exportCanvas.height = height * scale
+          
+          const ctx = exportCanvas.getContext('2d')
+          if (!ctx) {
+            URL.revokeObjectURL(svgUrl)
+            continue
+          }
+          
+          // Draw SVG at high resolution
+          ctx.drawImage(img, 0, 0, exportCanvas.width, exportCanvas.height)
+          
+          URL.revokeObjectURL(svgUrl)
+          
+          // Export
+          const mimeType = format === 'png' ? 'image/png' : 'image/jpeg'
+          const quality = format === 'jpg' ? 0.9 : undefined
+          
+          exportCanvas.toBlob((blob) => {
+            if (!blob) return
+            
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            const fileName = `${props.layer.name || 'layer'}_${scale}x.${format}`
+            a.href = url
+            a.download = fileName
+            a.click()
+            URL.revokeObjectURL(url)
+          }, mimeType, quality)
+          
+          await new Promise(resolve => setTimeout(resolve, 100))
+          continue
+        } catch (e) {
+          console.error('Failed to render SVG, falling back to canvas:', e)
+          // Fall through to canvas rendering
+        }
+      }
     }
     
     // For raster formats, we need canvas

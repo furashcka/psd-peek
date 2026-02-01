@@ -76,7 +76,7 @@
 
       <!-- Right panel with properties -->
       <div class="properties-panel floating" v-if="selectedLayer">
-        <LayerProperties :layer="selectedLayer" />
+        <LayerProperties :layer="selectedLayer" :psd="psdData" />
       </div>
 
       <!-- Zoom controls -->
@@ -164,9 +164,15 @@ const loadPsdFile = async (file: File) => {
       skipLayerImageData: false,
       skipThumbnail: true,
       useImageData: false,
+      skipLinkedFilesData: false, // Enable linked files data
       // Enable vector data loading
       skipVectorData: false
     })
+    
+    // Debug: log linkedFiles if available
+    if (psd.linkedFiles && psd.linkedFiles.length > 0) {
+      console.log('🔗 Found linkedFiles:', psd.linkedFiles.length)
+    }
     
     loadingStatus.value = 'Processing layers...'
     await new Promise(resolve => setTimeout(resolve, 100))

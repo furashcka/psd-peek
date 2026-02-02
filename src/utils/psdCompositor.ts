@@ -152,6 +152,104 @@ function isLayerVisible(
 }
 
 /**
+ * Композитинг массива слоёв с поддержкой clipping masks
+ */
+function compositeLayersWithClipping(
+  ctx: CanvasRenderingContext2D,
+  layers: any[],
+  options: CompositorOptions,
+  parentVisible: boolean = true
+): void {
+  let i = 0
+  while (i < layers.length) {
+    const layer = layers[i]
+    
+    // Проверить есть ли следующие слои с clipping
+    const clippedLayers: any[] = []
+    let j = i + 1
+    while (j < layers.length && layers[j].clipping) {
+      clippedLayers.push(layers[j])
+      j++
+    }
+    
+    if (clippedLayers.length > 0) {
+      // Есть clipped слои - рендерим группу с маской
+      renderClippingGroup(ctx, layer, clippedLayers, options, parentVisible)
+      i = j  // Пропустить обработанные clipped слои
+    } else {
+      // Обычный слой без clipping
+      compositeLayerInternal(ctx, layer, options, parentVisible)
+      i++
+    }
+  }
+}
+
+/**
+ * Рендеринг группы слоёв с clipping mask
+ */
+function renderClippingGroup(
+  ctx: CanvasRenderingContext2D,
+  baseLayer: any,
+  clippedLayers: any[],
+  options: CompositorOptions,
+  parentVisible: boolean
+): void {
+  // Создать временный canvas для группы
+  const tempCanvas = document.createElement('canvas')
+  tempCanvas.width = ctx.canvas.width
+  tempCanvas.height = ctx.canvas.height
+  const tempCtx = tempCanvas.getContext('2d', { alpha: true })!
+  
+  // 1. Рендерим clipped слои сначала
+  for (const clippedLayer of clippedLayers) {
+    const visible = isLayerVisible(clippedLayer, options.layerVisibility || new Map(), parentVisible)
+    if (!visible) continue
+    
+    if (clippedLayer.canvas) {
+      tempCtx.save()
+      
+      // Применить opacity
+      const opacity = (clippedLayer.opacity !== undefined && clippedLayer.opacity !== null)
+        ? clippedLayer.opacity
+        : 1
+      const fillOpacity = (clippedLayer.fillOpacity !== undefined && clippedLayer.fillOpacity !== null)
+        ? clippedLayer.fillOpacity
+        : 1
+      tempCtx.globalAlpha = opacity * fillOpacity
+      
+      // Применить blend mode
+      if (options.applyBlendModes !== false && clippedLayer.blendMode) {
+        const canvasBlendMode = BLEND_MODE_MAP[clippedLayer.blendMode]
+        if (canvasBlendMode) {
+          tempCtx.globalCompositeOperation = canvasBlendMode
+        }
+      }
+      
+      // Нарисовать clipped слой
+      const x = clippedLayer.left || 0
+      const y = clippedLayer.top || 0
+      tempCtx.drawImage(clippedLayer.canvas, x, y)
+      
+      tempCtx.restore()
+    }
+  }
+  
+  // 2. Применить маску (обрезать по base layer)
+  if (baseLayer.canvas) {
+    tempCtx.globalCompositeOperation = 'destination-in'
+    const baseX = baseLayer.left || 0
+    const baseY = baseLayer.top || 0
+    tempCtx.drawImage(baseLayer.canvas, baseX, baseY)
+  }
+  
+  // 3. Нарисовать base layer на основной canvas
+  compositeLayerInternal(ctx, baseLayer, options, parentVisible)
+  
+  // 4. Нарисовать clipped результат поверх
+  ctx.drawImage(tempCanvas, 0, 0)
+}
+
+/**
  * Композитинг одного слоя (внутренняя функция)
  */
 function compositeLayerInternal(
@@ -217,10 +315,8 @@ function compositeLayerInternal(
       
       ctx.restore()
     } else {
-      // Без временного canvas - просто рендерим детей напрямую
-      for (const child of layer.children) {
-        compositeLayerInternal(ctx, child, options, visible)
-      }
+      // Без временного canvas - рендерим детей с учётом clipping masks
+      compositeLayersWithClipping(ctx, layer.children, options, visible)
     }
     return
   }
@@ -308,11 +404,9 @@ export function compositePsd(
     ctx.translate(-viewport.x, -viewport.y)
   }
   
-  // Композитинг всех слоёв
+  // Композитинг всех слоёв с учётом clipping masks
   if (psd.children) {
-    for (const layer of psd.children) {
-      compositeLayerInternal(ctx, layer, options)
-    }
+    compositeLayersWithClipping(ctx, psd.children, options)
   }
   
   // Сохранить в кэш

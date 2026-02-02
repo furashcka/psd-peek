@@ -96,6 +96,7 @@ import { readPsd, initializeCanvas } from 'ag-psd'
 import LayerTree from '@/components/LayerTree.vue'
 import LayerProperties from '@/components/LayerProperties.vue'
 import type { Psd, Layer } from 'ag-psd'
+import { compositePsd, clearCompositorCache } from '@/utils/psdCompositor'
 
 // Initialize canvas for ag-psd
 if (typeof document !== 'undefined') {
@@ -154,6 +155,9 @@ const loadPsdFile = async (file: File) => {
   try {
     isLoading.value = true
     loadingStatus.value = 'Reading file...'
+    
+    // Очистить кэш композитора
+    clearCompositorCache()
     
     const arrayBuffer = await file.arrayBuffer()
     
@@ -271,9 +275,8 @@ const drawCanvas = () => {
   const ctx = canvas.value.getContext('2d')
   if (!ctx) return
   
-  const psdCanvas = (canvas.value as any).__psdCanvas
   const psd = (canvas.value as any).__psdData
-  if (!psdCanvas || !psd) return
+  if (!psd) return
   
   // Clear canvas
   ctx.fillStyle = '#2c2c2c'
@@ -283,11 +286,24 @@ const drawCanvas = () => {
   ctx.save()
   ctx.translate(canvas.value.width / 2 + panX.value, canvas.value.height / 2 + panY.value)
   ctx.scale(zoom.value, zoom.value)
-  ctx.translate(-psdCanvas.width / 2, -psdCanvas.height / 2)
+  ctx.translate(-psd.width / 2, -psd.height / 2)
   
-  // Draw full composite (visibility toggle doesn't work with ag-psd)
-  ctx.drawImage(psdCanvas, 0, 0)
+  // 🎯 Используем наш композитор с кэшированием!
+  const compositeCanvas = compositePsd(psd, {
+    layerVisibility: layerVisibility.value,
+    applyBlendModes: true
+  })
   
+  ctx.drawImage(compositeCanvas, 0, 0)
+  
+  // Draw overlays (selection, measurements) - это быстро
+  drawOverlays(ctx, psd)
+  
+  ctx.restore()
+}
+
+// Отдельная функция для рисования overlay (selection, measurements)
+const drawOverlays = (ctx: CanvasRenderingContext2D, psd: any) => {
   // Draw selection of selected layer
   if (selectedLayer.value) {
     const layer = selectedLayer.value as any
@@ -452,12 +468,14 @@ const drawCanvas = () => {
     ctx.strokeRect(hLeft, hTop, hWidth, hHeight)
     ctx.setLineDash([])
   }
-  
-  ctx.restore()
 }
 
 const toggleLayerVisibility = (layer: any) => {
-  alert('Coming soon: Layer visibility toggle is under development')
+  const currentVisibility = layerVisibility.value.get(layer.__uniqueId)
+  layerVisibility.value.set(layer.__uniqueId, !currentVisibility)
+  
+  // Перерисовать canvas с новой видимостью
+  drawCanvas()
 }
 
 const selectLayer = (layer: any) => {

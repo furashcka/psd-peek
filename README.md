@@ -9,7 +9,7 @@ Open-source browser-based PSD file inspector — a free alternative to Avocode, 
 - 🎨 Load PSD files via drag & drop or file selection
 - 🖼️ Canvas preview with zoom and pan controls
 - 📁 Layer tree with hierarchy and groups
-- 👁️ Show/hide layers with visibility toggle (currently disabled)
+- 👁️ Show/hide layers with visibility toggle (with dynamic re-rendering)
 - 🎯 Click layers on canvas to select them (including vector layers)
 - 📏 Measure distances between layers
 - 📋 View layer properties (size, position, opacity, blend mode, effects)
@@ -21,9 +21,10 @@ Open-source browser-based PSD file inspector — a free alternative to Avocode, 
   - One-click copy buttons for CSS and text content
 - 📤 Export layers to PNG, JPG, SVG
   - Multiple export scales (1x, 2x, 3x, 4x)
+  - High-quality SVG rendering for vector Smart Objects
   - Preview with checkerboard background
   - SVG export for vector shape layers
-  - Smart Objects exported as rasterized images
+  - Smart Objects: embedded SVG files exported directly, AI/PDF exported as raw files
 - ⌨️ Keyboard shortcuts (S - select, H - hand tool, L - toggle layers panel, Space - pan)
 - 🔒 100% client-side, your files never leave your browser
 - 🆓 Completely free and open source
@@ -31,8 +32,17 @@ Open-source browser-based PSD file inspector — a free alternative to Avocode, 
 ## Technologies
 
 - Vue 3 + TypeScript
-- ag-psd - PSD file parsing
+- ag-psd - PSD file parsing with extended compositor for dynamic rendering
 - Vite
+
+## Architecture
+
+- **ag-psd** - Parses PSD files and provides layer metadata
+- **Custom Compositor** (`src/utils/psdCompositor.ts`) - Dynamic layer compositing with:
+  - Layer visibility toggling
+  - Blend mode support (via Canvas API)
+  - Performance optimizations (caching, viewport culling)
+  - Group rendering with proper opacity/blend modes
 
 ## Installation and Running
 

@@ -80,15 +80,20 @@ function getVisibilityHash(
 ): string {
   const visibleIds: number[] = []
   
-  function collectVisible(layer: any) {
-    const visible = !layer.hidden && layerVisibility.get(layer.__uniqueId) !== false
-    if (visible) {
+  function collectVisible(layer: any, parentVisible: boolean = true) {
+    // Проверить переопределение видимости
+    const visibilityOverride = layerVisibility.get(layer.__uniqueId)
+    const isVisible = visibilityOverride !== undefined 
+      ? (parentVisible && visibilityOverride)
+      : (parentVisible && !layer.hidden)
+    
+    if (isVisible) {
       visibleIds.push(layer.__uniqueId)
     }
     
     if (layer.children) {
       for (const child of layer.children) {
-        collectVisible(child)
+        collectVisible(child, isVisible)
       }
     }
   }
@@ -135,14 +140,15 @@ function isLayerVisible(
 ): boolean {
   if (!parentVisible) return false
   
-  // Проверить собственную видимость
-  if (layer.hidden === true) return false
-  
-  // Проверить в Map
+  // Проверить переопределение видимости в Map (приоритет!)
   const visibilityOverride = layerVisibility.get(layer.__uniqueId)
-  if (visibilityOverride === false) return false
+  if (visibilityOverride !== undefined) {
+    // Если есть явное переопределение - используем его
+    return visibilityOverride
+  }
   
-  return true
+  // Иначе используем оригинальное состояние из PSD
+  return !layer.hidden
 }
 
 /**
@@ -156,15 +162,30 @@ function compositeLayerInternal(
 ): void {
   const visible = isLayerVisible(layer, options.layerVisibility || new Map(), parentVisible)
   
-  if (!visible) return
+  if (!visible) {
+    return
+  }
   
   // Если это группа - рендерим детей
   if (layer.children && layer.children.length > 0) {
-    // Только создаём временный canvas если у группы есть blend mode отличный от normal
-    const needsGroupCanvas = options.applyBlendModes !== false && 
-                             layer.blendMode && 
-                             layer.blendMode !== 'normal' &&
-                             layer.blendMode !== 'pass through'
+    const opacity = (layer.opacity !== undefined && layer.opacity !== null)
+      ? layer.opacity
+      : 1
+    const fillOpacity = (layer.fillOpacity !== undefined && layer.fillOpacity !== null)
+      ? layer.fillOpacity
+      : 1
+    const combinedOpacity = opacity * fillOpacity
+    
+    // Нужен временный canvas если:
+    // 1. У группы есть blend mode (не normal/pass through)
+    // 2. У группы есть opacity/fillOpacity < 1
+    const needsGroupCanvas = (
+      (options.applyBlendModes !== false && 
+       layer.blendMode && 
+       layer.blendMode !== 'normal' &&
+       layer.blendMode !== 'pass through') ||
+      combinedOpacity < 1
+    )
     
     if (needsGroupCanvas) {
       ctx.save()
@@ -183,24 +204,23 @@ function compositeLayerInternal(
         compositeLayerInternal(groupCtx, child, options, visible)
       }
       
-      // Применить blend mode и opacity группы
-      ctx.globalAlpha = layer.opacity !== undefined ? layer.opacity : 1
-      ctx.globalCompositeOperation = BLEND_MODE_MAP[layer.blendMode] || 'source-over'
+      // Применить blend mode и opacity группы к результату
+      const groupOpacity = opacity * fillOpacity
+      ctx.globalAlpha = groupOpacity
+      
+      if (options.applyBlendModes !== false && layer.blendMode && 
+          layer.blendMode !== 'normal' && layer.blendMode !== 'pass through') {
+        ctx.globalCompositeOperation = BLEND_MODE_MAP[layer.blendMode] || 'source-over'
+      }
+      
       ctx.drawImage(groupCanvas, 0, 0)
       
       ctx.restore()
     } else {
-      // Без blend mode - просто рендерим детей напрямую (быстрее!)
-      ctx.save()
-      if (layer.opacity !== undefined && layer.opacity !== 1) {
-        ctx.globalAlpha = layer.opacity
-      }
-      
+      // Без временного canvas - просто рендерим детей напрямую
       for (const child of layer.children) {
         compositeLayerInternal(ctx, child, options, visible)
       }
-      
-      ctx.restore()
     }
     return
   }
@@ -209,9 +229,17 @@ function compositeLayerInternal(
   if (layer.canvas) {
     ctx.save()
     
-    // Применить opacity
-    const opacity = layer.opacity !== undefined ? layer.opacity : 1
-    ctx.globalAlpha = opacity
+    // Применить opacity и fillOpacity (ag-psd уже возвращает 0-1)
+    const opacity = (layer.opacity !== undefined && layer.opacity !== null)
+      ? layer.opacity
+      : 1
+    const fillOpacity = (layer.fillOpacity !== undefined && layer.fillOpacity !== null)
+      ? layer.fillOpacity
+      : 1
+    
+    // Для обычных слоёв fillOpacity влияет на содержимое, opacity на весь результат
+    // Итоговая прозрачность = opacity * fillOpacity
+    ctx.globalAlpha = opacity * fillOpacity
     
     // Применить blend mode
     if (options.applyBlendModes !== false && layer.blendMode) {
@@ -249,12 +277,8 @@ export function compositePsd(
   
   const cached = compositorCache.get(cacheKey)
   if (cached) {
-    console.log('✅ Using cached composite')
     return cached
   }
-  
-  console.log('🎨 Rendering composite...')
-  const startTime = performance.now()
   
   const viewport = options.viewport || {
     x: 0,
@@ -290,9 +314,6 @@ export function compositePsd(
       compositeLayerInternal(ctx, layer, options)
     }
   }
-  
-  const endTime = performance.now()
-  console.log(`⏱️ Composite took ${(endTime - startTime).toFixed(2)}ms`)
   
   // Сохранить в кэш
   compositorCache.set(cacheKey, canvas)

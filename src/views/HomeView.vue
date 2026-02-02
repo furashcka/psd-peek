@@ -294,6 +294,10 @@ const drawCanvas = () => {
     applyBlendModes: true
   })
   
+  console.log('🖼️ Composite canvas:', compositeCanvas.width, 'x', compositeCanvas.height)
+  console.log('🎨 Main canvas:', canvas.value.width, 'x', canvas.value.height)
+  console.log('🔍 Zoom:', zoom.value, 'Pan:', panX.value, panY.value)
+  
   ctx.drawImage(compositeCanvas, 0, 0)
   
   // Draw overlays (selection, measurements) - это быстро

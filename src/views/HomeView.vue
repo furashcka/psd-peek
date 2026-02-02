@@ -136,6 +136,140 @@ const showLeftPanel = ref(true)
 // Hover layer for measurements
 const hoverLayer = ref<Node | null>(null)
 
+// Calculate bounding box for a group from all its children
+const calculateGroupBounds = (group: any): { left: number, top: number, right: number, bottom: number } => {
+  let minLeft = Infinity
+  let minTop = Infinity
+  let maxRight = -Infinity
+  let maxBottom = -Infinity
+  
+  const processLayer = (layer: any) => {
+    // Skip hidden layers
+    const visible = layerVisibility.value.get(layer.__uniqueId)
+    if (visible === false) return
+    if (layer.hidden && visible === undefined) return
+    
+    if (layer.children) {
+      // Recursively process children
+      for (const child of layer.children) {
+        processLayer(child)
+      }
+    } else {
+      // Leaf layer - use its bounds
+      const left = layer.left || 0
+      const top = layer.top || 0
+      const right = layer.right || 0
+      const bottom = layer.bottom || 0
+      
+      minLeft = Math.min(minLeft, left)
+      minTop = Math.min(minTop, top)
+      maxRight = Math.max(maxRight, right)
+      maxBottom = Math.max(maxBottom, bottom)
+    }
+  }
+  
+  if (group.children) {
+    for (const child of group.children) {
+      processLayer(child)
+    }
+  }
+  
+  // Fallback if no visible children
+  if (minLeft === Infinity) {
+    return {
+      left: group.left || 0,
+      top: group.top || 0,
+      right: group.right || 0,
+      bottom: group.bottom || 0
+    }
+  }
+  
+  return {
+    left: minLeft,
+    top: minTop,
+    right: maxRight,
+    bottom: maxBottom
+  }
+}
+
+// Calculate tight bounding box from actual canvas pixels (excluding transparent)
+const calculateTightBounds = (layer: any): { left: number, top: number, right: number, bottom: number } | null => {
+  if (!layer.canvas) return null
+  
+  const canvas = layer.canvas
+  const ctx = canvas.getContext('2d')!
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const data = imageData.data
+  
+  let minX = canvas.width
+  let minY = canvas.height
+  let maxX = 0
+  let maxY = 0
+  
+  // Scan all pixels to find non-transparent bounds
+  for (let y = 0; y < canvas.height; y++) {
+    for (let x = 0; x < canvas.width; x++) {
+      const alpha = data[(y * canvas.width + x) * 4 + 3]
+      if (alpha > 0) {
+        minX = Math.min(minX, x)
+        minY = Math.min(minY, y)
+        maxX = Math.max(maxX, x)
+        maxY = Math.max(maxY, y)
+      }
+    }
+  }
+  
+  // No opaque pixels found
+  if (minX > maxX) return null
+  
+  const layerLeft = layer.left || 0
+  const layerTop = layer.top || 0
+  
+  return {
+    left: layerLeft + minX,
+    top: layerTop + minY,
+    right: layerLeft + maxX + 1,
+    bottom: layerTop + maxY + 1
+  }
+}
+
+// Get layer bounds (with tight bounds for regular layers)
+const getLayerBounds = (layer: any): { left: number, top: number, right: number, bottom: number } => {
+  let left = layer.left || 0
+  let top = layer.top || 0
+  let right = layer.right || 0
+  let bottom = layer.bottom || 0
+  
+  // For groups, calculate bounding box from children
+  if (layer.children && layer.children.length > 0) {
+    const bbox = calculateGroupBounds(layer)
+    left = bbox.left
+    top = bbox.top
+    right = bbox.right
+    bottom = bbox.bottom
+  }
+  // For vector layers, use bounding box from vectorOrigination
+  else if (layer.vectorOrigination?.keyDescriptorList?.[0]?.keyOriginShapeBoundingBox) {
+    const bbox = layer.vectorOrigination.keyDescriptorList[0].keyOriginShapeBoundingBox
+    left = bbox.left.value
+    top = bbox.top.value
+    right = bbox.right.value
+    bottom = bbox.bottom.value
+  }
+  // For regular layers with canvas, try to get tight bounds
+  else if (layer.canvas) {
+    const tightBounds = calculateTightBounds(layer)
+    if (tightBounds) {
+      left = tightBounds.left
+      top = tightBounds.top
+      right = tightBounds.right
+      bottom = tightBounds.bottom
+    }
+  }
+  
+  return { left, top, right, bottom }
+}
+
 const handleFileSelect = async (event: Event) => {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
@@ -311,26 +445,17 @@ const drawOverlays = (ctx: CanvasRenderingContext2D, psd: any) => {
   // Draw selection of selected layer
   if (selectedLayer.value) {
     const layer = selectedLayer.value as any
-    let left = layer.left || 0
-    let top = layer.top || 0
-    let right = layer.right || 0
-    let bottom = layer.bottom || 0
-    
-    // For vector layers, use bounding box from vectorOrigination
-    if (layer.vectorOrigination?.keyDescriptorList?.[0]?.keyOriginShapeBoundingBox) {
-      const bbox = layer.vectorOrigination.keyDescriptorList[0].keyOriginShapeBoundingBox
-      left = bbox.left.value
-      top = bbox.top.value
-      right = bbox.right.value
-      bottom = bbox.bottom.value
-    }
-    
+    const { left, top, right, bottom } = getLayerBounds(layer)
     const width = right - left
     const height = bottom - top
     
+    ctx.save()
     ctx.strokeStyle = '#42b983'
     ctx.lineWidth = 2 / zoom.value
+    
+    // Рисуем прямоугольник по точным координатам из PSD
     ctx.strokeRect(left, top, width, height)
+    ctx.restore()
   }
   
   // Draw measurements between selected and hover layer
@@ -338,19 +463,21 @@ const drawOverlays = (ctx: CanvasRenderingContext2D, psd: any) => {
     const selected = selectedLayer.value
     const hover = hoverLayer.value
     
-    const sLeft = selected.left || 0
-    const sTop = selected.top || 0
-    const sWidth = (selected.right || 0) - (selected.left || 0)
-    const sHeight = (selected.bottom || 0) - (selected.top || 0)
-    const sRight = sLeft + sWidth
-    const sBottom = sTop + sHeight
+    const sBounds = getLayerBounds(selected)
+    const sLeft = sBounds.left
+    const sTop = sBounds.top
+    const sRight = sBounds.right
+    const sBottom = sBounds.bottom
+    const sWidth = sRight - sLeft
+    const sHeight = sBottom - sTop
     
-    const hLeft = hover.left || 0
-    const hTop = hover.top || 0
-    const hWidth = (hover.right || 0) - (hover.left || 0)
-    const hHeight = (hover.bottom || 0) - (hover.top || 0)
-    const hRight = hLeft + hWidth
-    const hBottom = hTop + hHeight
+    const hBounds = getLayerBounds(hover)
+    const hLeft = hBounds.left
+    const hTop = hBounds.top
+    const hRight = hBounds.right
+    const hBottom = hBounds.bottom
+    const hWidth = hRight - hLeft
+    const hHeight = hBottom - hTop
     
     ctx.strokeStyle = '#ff6b6b'
     ctx.fillStyle = '#ff6b6b'

@@ -7,6 +7,7 @@
       :selected-layer="selectedLayer"
       :expanded-groups="expandedGroups"
       :layer-visibility="layerVisibility"
+      :disable-visibility-toggle="disableVisibilityToggle"
       @layer-select="$emit('layer-select', $event)"
       @toggle-visibility="$emit('toggle-visibility', $event)"
     />
@@ -22,6 +23,7 @@ defineProps<{
   selectedLayer: Layer | null
   expandedGroups: Set<number>
   layerVisibility: Map<number, boolean>
+  disableVisibilityToggle?: boolean
 }>()
 
 defineEmits<{

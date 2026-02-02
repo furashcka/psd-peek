@@ -29,6 +29,19 @@ Open-source browser-based PSD file inspector — a free alternative to Avocode, 
 - 🔒 100% client-side, your files never leave your browser
 - 🆓 Completely free and open source
 
+## Known Limitations
+
+⚠️ **Layer Effects Not Rendered**: The application currently uses Photoshop's pre-rendered composite image by default, which includes all effects (gradients, shadows, etc.). However, this means:
+- Layer visibility toggling is disabled in composite mode (toggle 🔧 icon to enable dynamic rendering without effects)
+- Dynamic rendering mode (🔧) does not render layer effects like Gradient Overlay, Drop Shadow, etc.
+- Effects metadata is available for CSS generation, but visual rendering requires manual implementation
+
+**Why?** ag-psd provides layer effect metadata but doesn't render them. Implementing effect rendering (gradients, shadows, bevels, etc.) is a complex task that requires recreating Photoshop's rendering engine.
+
+**Workaround**: Use the 🎨/🔧 toggle button to switch between:
+- 🎨 Photoshop composite (with effects, no layer control)
+- 🔧 Dynamic rendering (layer control, no effects)
+
 ## Technologies
 
 - Vue 3 + TypeScript

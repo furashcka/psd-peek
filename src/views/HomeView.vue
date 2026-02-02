@@ -56,6 +56,14 @@
           <span class="tool-icon">✋</span>
           <span class="tool-key">H</span>
         </button>
+        <div class="toolbar-separator"></div>
+        <button 
+          :class="{ active: usePhotoshopComposite }" 
+          @click="usePhotoshopComposite = !usePhotoshopComposite; drawCanvas()"
+          :title="usePhotoshopComposite ? 'Using Photoshop composite (with effects)' : 'Using dynamic rendering (no effects)'"
+        >
+          <span class="tool-icon">{{ usePhotoshopComposite ? '🎨' : '🔧' }}</span>
+        </button>
       </div>
 
       <!-- Floating left panel -->
@@ -68,6 +76,7 @@
           :layers="reversedLayers" 
           :expanded-groups="expandedGroups"
           :layer-visibility="layerVisibility"
+          :disable-visibility-toggle="usePhotoshopComposite"
           @layer-select="selectLayer" 
           @toggle-visibility="toggleLayerVisibility"
           :selected-layer="selectedLayer" 
@@ -132,6 +141,9 @@ type Tool = 'select' | 'hand'
 const currentTool = ref<Tool>('select')
 const isSpacePressed = ref(false)
 const showLeftPanel = ref(true)
+
+// Rendering mode
+const usePhotoshopComposite = ref(true) // По умолчанию включён
 
 // Hover layer for measurements
 const hoverLayer = ref<Node | null>(null)
@@ -303,13 +315,35 @@ const loadPsdFile = async (file: File) => {
       skipThumbnail: true,
       useImageData: false,
       skipLinkedFilesData: false, // Enable linked files data
-      // Enable vector data loading
-      skipVectorData: false
+      skipVectorData: false,
+      skipCompositeImageData: false // Load composite with effects
     })
     
     // Debug: log linkedFiles if available
     if (psd.linkedFiles && psd.linkedFiles.length > 0) {
       console.log('🔗 Found linkedFiles:', psd.linkedFiles.length)
+    }
+    
+    // Debug: check if composite has effects
+    if (psd.canvas) {
+      console.log('📸 PSD has composite canvas (with effects)')
+    }
+    
+    // Debug: check layer effects
+    const checkEffects = (layer: any, indent = '') => {
+      if (layer.effects) {
+        console.log(`${indent}🎨 Layer "${layer.name}" has effects:`, Object.keys(layer.effects))
+      }
+      if (layer.children) {
+        for (const child of layer.children) {
+          checkEffects(child, indent + '  ')
+        }
+      }
+    }
+    if (psd.children) {
+      for (const layer of psd.children) {
+        checkEffects(layer)
+      }
     }
     
     loadingStatus.value = 'Processing layers...'
@@ -422,11 +456,20 @@ const drawCanvas = () => {
   ctx.scale(zoom.value, zoom.value)
   ctx.translate(-psd.width / 2, -psd.height / 2)
   
-  // 🎯 Используем наш композитор с кэшированием!
-  const compositeCanvas = compositePsd(psd, {
-    layerVisibility: layerVisibility.value,
-    applyBlendModes: true
-  })
+  // 🎯 Выбираем режим рендеринга
+  let compositeCanvas: HTMLCanvasElement
+  
+  if (usePhotoshopComposite.value && psd.canvas) {
+    // Используем готовый composite от Photoshop (с эффектами)
+    compositeCanvas = psd.canvas
+    console.log('📸 Using Photoshop composite (with effects)')
+  } else {
+    // Используем наш композитор (без эффектов, но с управлением слоями)
+    compositeCanvas = compositePsd(psd, {
+      layerVisibility: layerVisibility.value,
+      applyBlendModes: true
+    })
+  }
   
   console.log('🖼️ Composite canvas:', compositeCanvas.width, 'x', compositeCanvas.height)
   console.log('🎨 Main canvas:', canvas.value.width, 'x', canvas.value.height)

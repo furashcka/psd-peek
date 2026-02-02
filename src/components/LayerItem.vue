@@ -9,7 +9,11 @@
       <span class="layer-toggle" v-if="hasChildren" @click.stop="toggleExpanded">
         {{ isExpanded ? '▼' : '▶' }}
       </span>
-      <span class="layer-visibility" @click.stop="toggleVisibility">
+      <span 
+        v-if="!disableVisibilityToggle"
+        class="layer-visibility" 
+        @click.stop="toggleVisibility"
+      >
         {{ isVisible ? '👁️' : '👁️‍🗨️' }}
       </span>
       <span class="layer-icon">{{ getLayerIcon() }}</span>
@@ -24,6 +28,7 @@
         :selected-layer="selectedLayer"
         :expanded-groups="expandedGroups"
         :layer-visibility="layerVisibility"
+        :disable-visibility-toggle="disableVisibilityToggle"
         @layer-select="$emit('layer-select', $event)"
         @toggle-visibility="$emit('toggle-visibility', $event)"
       />
@@ -40,6 +45,7 @@ const props = defineProps<{
   selectedLayer: Layer | null
   expandedGroups: Set<number>
   layerVisibility: Map<number, boolean>
+  disableVisibilityToggle?: boolean
 }>()
 
 const emit = defineEmits<{
